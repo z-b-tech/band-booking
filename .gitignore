@@ -1,0 +1,11 @@
+# 测试脚本与截图，不部署
+test/
+
+# 本地凭据（不要上传）
+.local/
+*-secrets/
+*.key
+
+# 系统文件
+Thumbs.db
+.DS_Store

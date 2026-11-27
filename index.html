@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f13">
+<title>排练室预约 · 音乐社</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- 顶部提示：还没配置 Supabase 时显示 -->
+<div id="setupBanner" class="banner hidden">
+  <b>演示模式</b>：数据只存在这台设备的浏览器里。想让大家都能看到、
+  并且联系方式只有你能看 → 按 README 里 5 分钟接上 Supabase。
+  <span class="banner-admin">管理员账号：<code>admin</code> / <code>admin123</code></span>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">♪</div>
+    <div class="brand-text">
+      <h1 id="clubTitle">音乐社 · 排练室预约</h1>
+      <p id="clubSub">开放 10:00–14:00 / 17:30–21:00 · 最多提前 10 天</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="adminBadge" class="badge hidden">管理员</span>
+    <button id="btnAdmin" class="btn ghost small">管理员登录</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-view="booking">排练预约</button>
+  <button class="tab" data-view="borrow">设备外借</button>
+  <button class="tab" data-view="mine">我的登记</button>
+  <button class="tab hidden" data-view="admin" id="tabAdmin">管理</button>
+</nav>
+
+<main class="wrap">
+
+  <!-- ============ 预约 ============ -->
+  <section id="view-booking" class="view">
+    <div class="card">
+      <div class="row-between">
+        <h2>选择日期</h2>
+        <button id="btnRefresh" class="btn ghost small">刷新</button>
+      </div>
+      <div class="date-strip" id="dateStrip"></div>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <h2 id="dayTitle">今日安排</h2>
+        <div class="legend">
+          <span><i class="dot free"></i>空闲</span>
+          <span><i class="dot busy"></i>已预约</span>
+          <span><i class="dot conflict"></i>时段重叠</span>
+        </div>
+      </div>
+      <p class="hint">点一下格子选开始时间，再点一下选结束时间。可以多支乐队同时段，重叠会标红。</p>
+      <div id="timeline" class="timeline"></div>
+    </div>
+
+    <div class="card" id="formCard">
+      <h2>登记排练</h2>
+      <div class="sel-box" id="selSummary">还没有选择时段</div>
+      <form id="bookingForm" class="form" autocomplete="off">
+        <div class="field">
+          <label>乐队名 <span class="req">*</span></label>
+          <input name="band_name" maxlength="40" required placeholder="例如：夏日回声">
+        </div>
+        <div class="field">
+          <label>负责人 <span class="req">*</span></label>
+          <input name="leader_name" maxlength="20" required placeholder="例如：林同学">
+        </div>
+        <div class="field">
+          <label>联系方式 <span class="req">*</span></label>
+          <div class="contact-row">
+            <select name="contact_type" id="contactType">
+              <option value="wechat">微信</option>
+              <option value="qq">QQ</option>
+              <option value="phone">手机号</option>
+            </select>
+            <input name="contact" maxlength="60" required placeholder="填微信号 / QQ 号 / 手机号">
+          </div>
+          <small class="hint">仅管理员可见，公开列表不会显示。</small>
+        </div>
+        <label class="check">
+          <input type="checkbox" name="needs_double_pedal">
+          <span>鼓需要加装双踩</span>
+        </label>
+        <div class="field">
+          <label>备注</label>
+          <textarea name="note" maxlength="200" rows="2" placeholder="例如：需要接电钢琴 / 有 3 支麦"></textarea>
+        </div>
+        <div class="form-foot">
+          <button type="submit" class="btn primary" id="btnSubmitBooking">提交预约</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>当日安排</h2>
+      <div id="dayList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- ============ 设备外借 ============ -->
+  <section id="view-borrow" class="view hidden">
+    <div class="card">
+      <div class="row-between">
+        <h2>设备库存</h2>
+        <span class="hint" id="borrowDayLabel"></span>
+      </div>
+      <div id="equipGrid" class="equip-grid"></div>
+    </div>
+
+    <div class="card">
+      <h2>登记外借</h2>
+      <p class="hint">提交后需要管理员审批，通过后才会显示为「已批准」。</p>
+      <form id="borrowForm" class="form" autocomplete="off">
+        <div class="field">
+          <label>设备 <span class="req">*</span></label>
+          <select name="equipment_id" id="equipSelect" required></select>
+        </div>
+        <div class="field">
+          <label>数量 <span class="req">*</span></label>
+          <input name="qty" type="number" min="1" step="1" value="1" required>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label>借用日期 <span class="req">*</span></label>
+            <input name="borrow_date" type="date" required id="borrowDate">
+          </div>
+          <div class="field">
+            <label>借用人 <span class="req">*</span></label>
+            <input name="borrower_name" maxlength="20" required placeholder="例如：王同学">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label>开始时间 <span class="req">*</span></label>
+            <input name="start_time" type="time" required value="10:00">
+          </div>
+          <div class="field">
+            <label>归还时间 <span class="req">*</span></label>
+            <input name="end_time" type="time" required value="14:00">
+          </div>
+        </div>
+        <div class="field">
+          <label>联系方式 <span class="req">*</span></label>
+          <div class="contact-row">
+            <select name="contact_type">
+              <option value="wechat">微信</option>
+              <option value="qq">QQ</option>
+              <option value="phone">手机号</option>
+            </select>
+            <input name="contact" maxlength="60" required placeholder="仅管理员可见">
+          </div>
+        </div>
+        <div class="field">
+          <label>备注</label>
+          <input name="note" maxlength="200" placeholder="例如：需要一根 6.5 转 3.5 的线">
+        </div>
+        <div class="form-foot">
+          <button type="submit" class="btn primary">提交申请</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>外借记录</h2>
+      <div id="borrowList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- ============ 我的登记 ============ -->
+  <section id="view-mine" class="view hidden">
+    <div class="card">
+      <h2>我在这台设备上的登记</h2>
+      <p class="hint">提交成功后会记在这里（存在本机浏览器），可以自己取消。</p>
+      <div id="mineList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- ============ 管理 ============ -->
+  <section id="view-admin" class="view hidden">
+    <div class="card">
+      <div class="row-between">
+        <h2>待审批的外借</h2>
+        <button id="btnRefreshAdmin" class="btn ghost small">刷新</button>
+      </div>
+      <div id="pendingList" class="list"></div>
+    </div>
+
+    <div class="card">
+      <h2>全部预约（含联系方式）</h2>
+      <div class="table-wrap">
+        <table id="adminTable" class="table">
+          <thead>
+            <tr><th>日期</th><th>时间</th><th>乐队</th><th>负责人</th><th>联系方式</th><th>双踩</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>设备管理</h2>
+      <form id="equipForm" class="form inline">
+        <input name="name" maxlength="30" required placeholder="设备名，例如：音箱">
+        <input name="total_qty" type="number" min="1" value="1" required>
+        <button class="btn primary small">添加</button>
+      </form>
+      <div id="adminEquipList" class="list"></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span id="footMeta"></span>
+  </footer>
+</main>
+
+<!-- 登录弹窗 -->
+<div id="modalLogin" class="modal hidden">
+  <div class="modal-card">
+    <h3>管理员登录</h3>
+    <div class="field"><label>邮箱</label><input id="loginEmail" type="email" placeholder="admin@example.com"></div>
+    <div class="field"><label>密码</label><input id="loginPassword" type="password" placeholder="密码"></div>
+    <p class="hint" id="loginHint"></p>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btnDoLogin">登录</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
