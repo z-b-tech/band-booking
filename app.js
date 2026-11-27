@@ -328,6 +328,9 @@ function layoutBookings(list) {
 // ---------------- 渲染：时间轴 ----------------
 function renderTimeline() {
   const dayBookings = state.bookings.filter(b => b.booking_date === state.date);
+  // 当天仍占用设备的借出记录（待审批 / 已批准；已拒绝、已归还不显示）
+  const dayBorrows = state.borrows.filter(b =>
+    b.borrow_date === state.date && (b.status === 'pending' || b.status === 'approved'));
   const badge = overlapPairs(dayBookings);
   const now = new Date();
   const isToday = state.date === ymd(now);
@@ -349,18 +352,58 @@ function renderTimeline() {
     }
     const winList = dayBookings.filter(b => toMin(b.start_time) >= w.start && toMin(b.end_time) <= w.end);
     const lanes = layoutBookings(winList);
+
+    // —— 设备外借：裁到本窗口内 ——
+    const winBorrows = dayBorrows.map(b => {
+      const s = Math.max(toMin(b.start_time), w.start);
+      const e = Math.min(toMin(b.end_time), w.end);
+      return e > s ? Object.assign({}, b, { _s: s, _e: e }) : null;
+    }).filter(Boolean).sort((a, b) => a._s - b._s);
+
+    // 某条借出是否和排练撞在同一时段
+    const clashBorrow = new Set();
+    const clashBooking = new Set();
+    winBorrows.forEach(eb => {
+      const hit = winList.some(bk => toMin(bk.start_time) < eb._e && toMin(bk.end_time) > eb._s);
+      if (hit) clashBorrow.add(eb.id);
+    });
+    winList.forEach(bk => {
+      const hit = winBorrows.some(eb => toMin(bk.start_time) < eb._e && toMin(bk.end_time) > eb._s);
+      if (hit) clashBooking.add(bk.id);
+    });
+
     const blocks = winList.map(b => {
       const lay = lanes.get(b.id) || { lane: 0, lanes: 1 };
       const top = (toMin(b.start_time) - w.start) / SLOT * SLOT_PX;
       const h = (toMin(b.end_time) - toMin(b.start_time)) / SLOT * SLOT_PX;
       const bad = badge.get(b.id);
+      const eqClash = clashBooking.has(b.id);
       const wPct = 100 / lay.lanes;
-      return `<div class="booking-block ${bad ? 'conflict' : ''}"
+      return `<div class="booking-block ${bad ? 'conflict' : ''} ${eqClash ? 'equip-clash' : ''}"
                  style="top:${top}px;height:${Math.max(h - 3, 18)}px;left:${lay.lane * wPct}%;width:calc(${wPct}% - 4px)"
-                 title="${esc(b.band_name)} ${b.start_time}-${b.end_time}">
+                 title="${esc(b.band_name)} ${b.start_time}-${b.end_time}${eqClash ? ' · 设备被借走' : ''}">
           <div class="b-name">${esc(b.band_name)}${bad ? ' · 重叠' : ''}</div>
-          <div class="b-meta">${b.start_time.slice(0, 5)}–${b.end_time.slice(0, 5)} · ${esc(b.leader_name)}${b.needs_double_pedal ? ' · 双踩' : ''}</div>
+          <div class="b-meta">${b.start_time.slice(0, 5)}–${b.end_time.slice(0, 5)} · ${esc(b.leader_name)}${b.needs_double_pedal ? ' · 双踩' : ''}${eqClash ? ' · 设备冲突' : ''}</div>
         </div>`;
+    }).join('');
+
+    // —— 横贯时间轴的设备色带（在排练块下方）——
+    const equipBands = winBorrows.map(eb => {
+      const top = (eb._s - w.start) / SLOT * SLOT_PX;
+      const h = Math.max((eb._e - eb._s) / SLOT * SLOT_PX - 2, 6);
+      const clash = clashBorrow.has(eb.id);
+      return `<div class="equip-band ${clash ? 'clash' : ''}" style="top:${top}px;height:${h}px"></div>`;
+    }).join('');
+
+    // —— 右侧设备竖条 ——
+    const equipBars = winBorrows.map(eb => {
+      const top = (eb._s - w.start) / SLOT * SLOT_PX;
+      const h = Math.max((eb._e - eb._s) / SLOT * SLOT_PX - 2, 6);
+      const clash = clashBorrow.has(eb.id);
+      const pend = eb.status === 'pending';
+      const tip = `${eb.item_name} ×${eb.qty}  ${String(eb.start_time).slice(0, 5)}–${String(eb.end_time).slice(0, 5)}  ${eb.borrower_name}${pend ? '（待审批）' : ''}${clash ? ' · 与排练冲突' : ''}`;
+      return `<div class="equip-bar ${clash ? 'clash' : ''} ${pend ? 'pending' : ''}"
+                   style="top:${top}px;height:${h}px" title="${esc(tip)}"></div>`;
     }).join('');
 
     let sel = '';
@@ -382,11 +425,18 @@ function renderTimeline() {
 
     return `<div class="window" data-win="${wi}">
       <div class="window-head"><span>${w.label}</span>
-        <span>${conflicts ? `<span class="badge danger">${conflicts} 队时段重叠</span>` : '<span class="badge mute">空闲</span>'}</span>
+        <span class="head-badges">
+          ${conflicts ? `<span class="badge danger">${conflicts} 队时段重叠</span>` : ''}
+          ${clashBorrow.size ? `<span class="badge danger">设备冲突</span>`
+            : (winBorrows.length ? `<span class="badge warn">设备借出 ${winBorrows.length}</span>` : '')}
+          ${!conflicts && !winBorrows.length ? '<span class="badge mute">空闲</span>' : ''}
+        </span>
       </div>
       <div class="track" data-win="${wi}" style="height:${height}px">
         ${lines.join('')}${labels.join('')}
+        ${equipBands}
         <div class="blocks">${blocks}${sel}</div>
+        <div class="equip-gutter" title="设备外借时段">${equipBars}</div>
         ${past}${nowLine}
       </div>
     </div>`;
@@ -453,19 +503,38 @@ function renderSelBox() {
 function renderDayList() {
   const list = state.bookings.filter(b => b.booking_date === state.date)
     .sort((a, b) => a.start_time.localeCompare(b.start_time));
+  const borrows = state.borrows.filter(b => b.borrow_date === state.date &&
+      (b.status === 'pending' || b.status === 'approved'))
+    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
   const badge = overlapPairs(list);
   const el = $('#dayList');
-  if (!list.length) { el.innerHTML = '<div class="empty">这一天还没有人预约，先到先得</div>'; return; }
-  el.innerHTML = list.map(b => {
+  if (!list.length && !borrows.length) {
+    el.innerHTML = '<div class="empty">这一天还没有人预约，先到先得</div>';
+    return;
+  }
+  const bookingHtml = list.map(b => {
     const bad = badge.get(b.id);
-    return `<div class="item ${bad ? 'conflict' : ''}">
+    const eqClash = borrows.some(eb => toMin(eb.start_time) < toMin(b.end_time) && toMin(eb.end_time) > toMin(b.start_time));
+    return `<div class="item ${bad ? 'conflict' : ''} ${eqClash ? 'equip-clash' : ''}">
       <div class="time">${b.start_time.slice(0, 5)}<br><span style="font-size:10px;color:var(--dim)">${b.end_time.slice(0, 5)}</span></div>
       <div class="main">
-        <div class="title">${esc(b.band_name)} ${bad ? `<span class="badge danger">重叠</span>` : ''} ${b.needs_double_pedal ? '<span class="badge warn">双踩</span>' : ''}</div>
+        <div class="title">${esc(b.band_name)} ${bad ? `<span class="badge danger">重叠</span>` : ''} ${eqClash ? `<span class="badge danger">设备冲突</span>` : ''} ${b.needs_double_pedal ? '<span class="badge warn">双踩</span>' : ''}</div>
         <div class="sub">负责人 ${esc(b.leader_name)}${b.note ? ' · ' + esc(b.note) : ''}</div>
       </div>
     </div>`;
   }).join('');
+  const borrowHtml = borrows.map(eb => `
+    <div class="item equip-item">
+      <div class="time">${String(eb.start_time).slice(0, 5)}<br><span style="font-size:10px;color:var(--dim)">${String(eb.end_time).slice(0, 5)}</span></div>
+      <div class="main">
+        <div class="title">${esc(eb.item_name)} × ${eb.qty}
+          <span class="badge warn">设备外借</span>
+          ${eb.status === 'pending' ? '<span class="badge mute">待审批</span>' : '<span class="badge ok">已批准</span>'}
+        </div>
+        <div class="sub">借用人 ${esc(eb.borrower_name)}${eb.note ? ' · ' + esc(eb.note) : ''}</div>
+      </div>
+    </div>`).join('');
+  el.innerHTML = bookingHtml + borrowHtml;
 }
 
 // ---------------- 渲染：设备 ----------------
