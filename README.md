@@ -7,10 +7,12 @@
 - 数据存 Supabase 免费版
 - 手机优先，扫码就能用
 
-> ## ✅ 当前状态：后端已接通
+> ## ✅ 已上线
 >
 > | 项目 | 值 |
 > |---|---|
+> | **访问地址** | **https://z-b-tech.github.io/band-booking/** |
+> | 仓库 | https://github.com/z-b-tech/band-booking |
 > | Supabase 项目 | `slvwroxkujqipojzltrq` |
 > | 区域 | `ap-southeast-1`（新加坡） |
 > | API 地址 | `https://slvwroxkujqipojzltrq.supabase.co` |
@@ -18,10 +20,9 @@
 > | 管理员账号 | `2312729929@qq.com`（密码见 `E:\Work\band-booking-secrets\admin-account.txt`） |
 > | 公开注册 | 已关闭 |
 >
-> 已验证：匿名可登记录入、公开视图不泄露联系方式、匿名读原表返回 401、
-> 管理员可读原表、取消接口正常、页面已从云端读到设备数据。
->
-> **还差最后一步：把 `band-booking` 文件夹传到 GitHub Pages（见第三节）。**
+> 已验证：公网首页 200、演示横幅消失、页脚显示「数据由 Supabase 提供」、
+> 设备从云端读取、匿名读原表 401、无 JS 报错；国内直连可用（TTFB 约 0.6s，
+> 数据约 1.5–2s 出现），**同学不需要梯子**。
 
 ---
 
