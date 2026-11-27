@@ -237,6 +237,18 @@
   </div>
 </div>
 
+<!-- 通用确认框（选时段冲突时用） -->
+<div id="modalConfirm" class="modal hidden">
+  <div class="modal-card">
+    <h3 id="confirmTitle">提示</h3>
+    <div id="confirmBody" class="confirm-body"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="confirmNo">取消</button>
+      <button class="btn primary" id="confirmYes">确认</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script src="vendor/supabase.js"></script>

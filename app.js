@@ -256,6 +256,24 @@ function overlapPairs(list) {
   return badge;
 }
 function contactLabel(type) { return { wechat: '微信', qq: 'QQ', phone: '手机' }[type] || '联系'; }
+
+// 联系方式长度：数据库里有 3–60 的约束，这里提前拦，别让用户看到英文报错
+function checkContact(c) {
+  const s = String(c || '').trim();
+  if (s.length < 3) throw new Error('联系方式太短：请填完整的微信号 / QQ 号 / 手机号（至少 3 位）');
+  if (s.length > 60) throw new Error('联系方式太长（最多 60 个字符）');
+}
+
+// 把数据库的技术错误翻译成人话
+function friendlyError(msg) {
+  const m = String(msg || '');
+  if (m.includes('bookings_contact_check')) return '联系方式太短：请填完整的微信号 / QQ 号 / 手机号（至少 3 位）';
+  if (m.includes('booking_in_window')) return '这个时间不在开放时段内（10:00–14:00 / 17:30–21:00）';
+  if (m.includes('booking_time_order')) return '结束时间必须晚于开始时间';
+  if (m.includes('borrow_time_order')) return '归还时间必须晚于开始时间';
+  if (m.includes('contact') && m.includes('check')) return '联系方式格式不对，请检查一下';
+  return m;
+}
 function statusBadge(s) {
   const map = {
     pending:  ['待审批', 'warn'],
@@ -290,7 +308,7 @@ function renderDates() {
   }
   strip.innerHTML = html.join('');
   $$('.date-chip', strip).forEach(el => {
-    el.onclick = () => { state.date = el.dataset.date; state.sel = null; renderDates(); renderTimeline(); renderDayList(); renderBorrowTab(); };
+    el.onclick = () => { state.date = el.dataset.date; state.sel = null; state.selWarned = false; renderDates(); renderTimeline(); renderDayList(); renderBorrowTab(); };
   });
 }
 
@@ -323,6 +341,70 @@ function layoutBookings(list) {
   }
   flush();
   return out;
+}
+
+// ---------------- 通用确认框 ----------------
+function askConfirm(title, html, okText) {
+  return new Promise(resolve => {
+    const modal = $('#modalConfirm');
+    $('#confirmTitle').textContent = title;
+    $('#confirmBody').innerHTML = html;
+    $('#confirmYes').textContent = okText || '确认';
+    modal.classList.remove('hidden');
+    const done = (v) => {
+      modal.classList.add('hidden');
+      $('#confirmYes').onclick = null;
+      $('#confirmNo').onclick = null;
+      modal.onclick = null;
+      resolve(v);
+    };
+    $('#confirmYes').onclick = () => done(true);
+    $('#confirmNo').onclick = () => done(false);
+    modal.onclick = (ev) => { if (ev.target.id === 'modalConfirm') done(false); };
+  });
+}
+
+// 当前选中时段里的冲突（排练 + 设备）
+function currentConflicts(sel) {
+  const s = sel || state.sel;
+  if (!s) return { bookings: [], borrows: [] };
+  const day = state.date;
+  const bookings = state.bookings.filter(b => b.booking_date === day &&
+    toMin(b.start_time) < s.end && toMin(b.end_time) > s.start);
+  const borrows = state.borrows.filter(b => b.borrow_date === day &&
+    (b.status === 'pending' || b.status === 'approved') &&
+    toMin(b.start_time) < s.end && toMin(b.end_time) > s.start);
+  return { bookings, borrows };
+}
+
+// 选完时段后：有冲突就弹窗确认
+async function warnIfConflict(prev) {
+  if (!state.sel) { state.selWarned = false; return; }
+  const { bookings, borrows } = currentConflicts();
+  if (!bookings.length && !borrows.length) { state.selWarned = false; return; }
+
+  const lines = [];
+  if (bookings.length) {
+    const names = bookings.map(b =>
+      `${esc(b.band_name)}（${b.start_time.slice(0, 5)}–${b.end_time.slice(0, 5)}，${esc(b.leader_name)}）`).join('<br>');
+    lines.push(`<p class="cf-line"><span class="badge danger">已被预约</span></p><p class="cf-list">${names}</p>`);
+  }
+  if (borrows.length) {
+    const names = borrows.map(b =>
+      `${esc(b.item_name)} × ${b.qty}（${String(b.start_time).slice(0, 5)}–${String(b.end_time).slice(0, 5)}，${esc(b.borrower_name)}${b.status === 'pending' ? '，待审批' : ''}）`).join('<br>');
+    lines.push(`<p class="cf-line"><span class="badge warn">设备将被外借</span></p><p class="cf-list">${names}</p>`);
+  }
+  const html = lines.join('') + '<p class="cf-ask">仍要预约这个时间吗？</p>';
+
+  const ok = await askConfirm('这个时段有冲突', html, '仍然预约');
+  if (!ok) {
+    state.sel = prev || null;
+    state.selWarned = false;
+    renderTimeline();
+    return;
+  }
+  state.selWarned = true;
+  renderTimeline();
 }
 
 // ---------------- 渲染：时间轴 ----------------
@@ -458,7 +540,8 @@ function renderTimeline() {
   renderSelBox();
 }
 
-function pickSlot(m, w) {
+async function pickSlot(m, w) {
+  const prev = state.sel ? { start: state.sel.start, end: state.sel.end } : null;
   // 今天已经过去的格子不给选
   const now = new Date();
   if (state.date === ymd(now)) {
@@ -470,6 +553,7 @@ function pickSlot(m, w) {
   if (s && (s.start < w.start || s.start >= w.end)) {
     state.sel = { start: m, end: Math.min(m + SLOT, w.end) };
     renderTimeline();
+    await warnIfConflict(prev);
     return;
   }
   if (!s || m < s.start || m >= s.end) {
@@ -484,6 +568,7 @@ function pickSlot(m, w) {
     if (cur) state.sel.end = Math.min(state.sel.end, cur.end);
   }
   renderTimeline();
+  await warnIfConflict(prev);
 }
 
 function renderSelBox() {
@@ -640,11 +725,17 @@ $('#bookingForm').addEventListener('submit', async ev => {
       cancel_token: tok(),
     };
     if (!payload.band_name || !payload.leader_name || !payload.contact) throw new Error('乐队名 / 负责人 / 联系方式都要填');
+    checkContact(payload.contact);
 
-    // 冲突提示（允许，但提醒）
-    const clash = state.bookings.filter(b => b.booking_date === payload.booking_date &&
-      toMin(b.start_time) < state.sel.end && toMin(b.end_time) > state.sel.start).length;
-    if (clash && !confirm(`这个时段已经有 ${clash} 支乐队，仍然要登记吗？`)) { btn.disabled = false; btn.textContent = '提交预约'; return; }
+    // 冲突：选时段时已确认过就不再重复问；若期间数据变了，这里再拦一次
+    if (!state.selWarned) {
+      const { bookings, borrows } = currentConflicts();
+      if (bookings.length || borrows.length) {
+        const ok = await askConfirm('这个时段有冲突',
+          `该时段已有 ${bookings.length} 条排练、${borrows.length} 条设备外借，仍要提交吗？`, '仍然提交');
+        if (!ok) { btn.disabled = false; btn.textContent = '提交预约'; return; }
+      }
+    }
 
     const id = await api.createBooking(payload);
     mineAdd({
@@ -655,10 +746,11 @@ $('#bookingForm').addEventListener('submit', async ev => {
     });
     f.reset();
     state.sel = null;
+    state.selWarned = false;
     toast('预约已登记', 'ok');
     await refreshAll();
   } catch (e) {
-    toast('提交失败：' + e.message, 'err');
+    toast('提交失败：' + friendlyError(e.message), 'err');
   } finally {
     btn.disabled = false; btn.textContent = '提交预约';
   }
@@ -682,6 +774,7 @@ $('#borrowForm').addEventListener('submit', async ev => {
       note: (data.note || '').trim(), cancel_token: token,
     };
     if (!payload.borrower_name || !payload.contact) throw new Error('借用人和联系方式都要填');
+    checkContact(payload.contact);
     const id = await api.createBorrow(payload);
     mineAdd({
       kind: 'borrow', id, token,
@@ -694,7 +787,7 @@ $('#borrowForm').addEventListener('submit', async ev => {
     toast('已提交，等管理员审批', 'ok');
     await refreshAll();
   } catch (e) {
-    toast('提交失败：' + e.message, 'err');
+    toast('提交失败：' + friendlyError(e.message), 'err');
   }
 });
 

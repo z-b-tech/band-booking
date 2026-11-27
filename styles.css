@@ -303,6 +303,14 @@ textarea{resize:vertical;min-height:44px}
 }
 .modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 
+/* 冲突确认框 */
+#modalConfirm .modal-card{max-width:430px}
+.confirm-body{font-size:13.5px;color:#cfd8e6;line-height:1.75;max-height:46vh;overflow:auto}
+.confirm-body p{margin:0}
+.cf-line{margin:10px 0 6px}
+.cf-list{color:#a9b6c9;font-size:12.5px;line-height:1.9;padding-left:2px}
+.cf-ask{margin:14px 0 0;color:#ffd9a8}
+
 .toast{
   position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
   background:#1d2634;border:1px solid var(--line);color:var(--text);
