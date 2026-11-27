@@ -208,6 +208,21 @@
     </div>
 
     <div class="card">
+      <div class="row-between">
+        <h2>全部外借（含联系方式）</h2>
+        <span class="hint" id="adminBorrowHint"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="adminBorrowTable" class="table">
+          <thead>
+            <tr><th>日期</th><th>时间</th><th>设备</th><th>数量</th><th>借用人</th><th>联系方式</th><th>状态</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>设备管理</h2>
       <form id="equipForm" class="form inline">
         <input name="name" maxlength="30" required placeholder="设备名，例如：音箱">

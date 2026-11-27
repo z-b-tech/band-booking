@@ -121,6 +121,10 @@ function supabaseApi() {
       const { error } = await client.from('bookings').delete().eq('id', id);
       if (error) fail(error);
     },
+    async deleteBorrow(id) {
+      const { error } = await client.from('borrows').delete().eq('id', id);
+      if (error) fail(error);
+    },
     async setBorrowStatus(id, status) {
       const { error } = await client.from('borrows').update({ status }).eq('id', id);
       if (error) fail(error);
@@ -223,6 +227,7 @@ function demoApi() {
     async adminBookings() { return read().bookings.slice().sort((a, b) => (a.booking_date + a.start_time).localeCompare(b.booking_date + b.start_time)); },
     async adminBorrows() { return read().borrows.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))); },
     async deleteBooking(id) { const d = read(); d.bookings = d.bookings.filter(b => b.id !== id); write(d); },
+    async deleteBorrow(id) { const d = read(); d.borrows = d.borrows.filter(b => b.id !== id); write(d); },
     async setBorrowStatus(id, status) { const d = read(); const b = d.borrows.find(x => x.id === id); if (b) b.status = status; write(d); },
     async addEquipment(name, qty) { const d = read(); d.equipment.push({ id: uid(), name, total_qty: Number(qty) || 1, note: '', sort_order: 100 }); write(d); },
     async deleteEquipment(id) { const d = read(); d.equipment = d.equipment.filter(e => e.id !== id); write(d); },
@@ -875,7 +880,55 @@ function renderAdmin() {
   $$('#adminTable [data-del]').forEach(x => x.onclick = async () => {
     if (!confirm('删除这条预约？')) return;
     try { await api.deleteBooking(x.dataset.del); toast('已删除', 'ok'); await refreshAll(); await refreshAdmin(); }
-    catch (e) { toast('删除失败：' + e.message, 'err'); }
+    catch (e) { toast('删除失败：' + friendlyError(e.message), 'err'); }
+  });
+
+  // —— 全部外借（含已批准的，可撤销）——
+  const allB = state.adminBorrows.slice()
+    .sort((a, b) => (a.borrow_date + String(a.start_time)).localeCompare(b.borrow_date + String(b.start_time)));
+  const pendingN = allB.filter(b => b.status === 'pending').length;
+  $('#adminBorrowHint').textContent = `${allB.length} 条${pendingN ? ` · ${pendingN} 条待审批` : ''}`;
+  $('#adminBorrowTable tbody').innerHTML = allB.map(b => {
+    const acts = [];
+    if (b.status === 'pending') {
+      acts.push(`<button class="btn primary small" data-app2="${b.id}">通过</button>`);
+      acts.push(`<button class="btn danger small" data-rej2="${b.id}">拒绝</button>`);
+    } else if (b.status === 'approved') {
+      acts.push(`<button class="btn ghost small" data-ret2="${b.id}">标记归还</button>`);
+    }
+    acts.push(`<button class="btn danger small" data-delb="${b.id}">撤销</button>`);
+    return `<tr>
+      <td>${b.borrow_date}</td>
+      <td>${String(b.start_time).slice(0, 5)}–${String(b.end_time).slice(0, 5)}</td>
+      <td>${esc(b.item_name)}</td>
+      <td>${b.qty}</td>
+      <td>${esc(b.borrower_name)}</td>
+      <td>${contactLabel(b.contact_type)}：${esc(b.contact)}</td>
+      <td>${statusBadge(b.status)}</td>
+      <td>${acts.join(' ')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">暂无外借记录</td></tr>';
+
+  $$('#adminBorrowTable [data-app2]').forEach(x => x.onclick = () => setStatus(x.dataset.app2, 'approved'));
+  $$('#adminBorrowTable [data-rej2]').forEach(x => x.onclick = () => setStatus(x.dataset.rej2, 'rejected'));
+  $$('#adminBorrowTable [data-ret2]').forEach(x => x.onclick = () => setStatus(x.dataset.ret2, 'returned'));
+  $$('#adminBorrowTable [data-delb]').forEach(x => x.onclick = async () => {
+    if (!confirm('撤销这条外借记录？撤销后设备会重新变为可用。')) return;
+    const id = x.dataset.delb;
+    const before = state.adminBorrows;
+    // 乐观更新：先从列表里拿掉，界面立刻响应
+    state.adminBorrows = before.filter(b => b.id !== id);
+    renderAdmin();
+    try {
+      await api.deleteBorrow(id);
+      toast('已撤销', 'ok');
+      refreshAll().catch(() => {});
+      refreshAdmin().catch(() => {});
+    } catch (e) {
+      state.adminBorrows = before;
+      renderAdmin();
+      toast('撤销失败：' + friendlyError(e.message), 'err');
+    }
   });
 
   $('#adminEquipList').innerHTML = state.equipment.map(e => `
@@ -892,8 +945,18 @@ function renderAdmin() {
 }
 
 async function setStatus(id, status) {
-  try { await api.setBorrowStatus(id, status); toast('已更新', 'ok'); await refreshAdmin(); }
-  catch (e) { toast('更新失败：' + e.message, 'err'); }
+  const b = state.adminBorrows.find(x => x.id === id);
+  const old = b ? b.status : null;
+  if (b) { b.status = status; renderAdmin(); }   // 乐观更新
+  try {
+    await api.setBorrowStatus(id, status);
+    toast('已更新', 'ok');
+    refreshAll().catch(() => {});
+    refreshAdmin().catch(() => {});
+  } catch (e) {
+    if (b) { b.status = old; renderAdmin(); }
+    toast('更新失败：' + friendlyError(e.message), 'err');
+  }
 }
 
 $('#equipForm').addEventListener('submit', async ev => {
